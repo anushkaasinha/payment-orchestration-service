@@ -113,7 +113,16 @@ A lightweight frontend is bundled into Spring Boot static assets.
 ## Run Tests
 ```bash
 mvn test
-```
+
+## Screenshots
+
+### Dashboard
+![Dashboard](https://github.com/user-attachments/assets/10f75508-d760-4e29-ba54-2d79af3d0565)
+
+### Response Panel (Create Payment Success)
+![Create Payment Response](https://github.com/user-attachments/assets/ab16edae-add7-4299-99e3-e4ca1545fe7d)
+
+
 
 ## Why This Project Is Strong For Resume
 - Demonstrates core payment backend patterns, not CRUD-only APIs.
