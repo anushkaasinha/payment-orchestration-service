@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Payment Orchestration Console</title>
+  <link rel="stylesheet" href="/app/styles.css" />
+</head>
+<body>
+  <div class="bg"></div>
+  <main class="wrap">
+    <header class="hero">
+      <h1>Payment Orchestration Console</h1>
+      <p>Backend demo UI for merchant + admin flows.</p>
+      <div class="badge-row">
+        <span class="badge">Merchant Key: <code>m_demo_merchant_key</code></span>
+        <span class="badge">Admin Key: <code>admin_secret_123</code></span>
+      </div>
+    </header>
+
+    <section class="grid">
+      <article class="card">
+        <h2>Create Payment</h2>
+        <form id="createPaymentForm">
+          <label>Order ID <input name="orderId" value="ORD-FORCE_SUCCESS-001" required /></label>
+          <label>Amount <input name="amount" type="number" step="0.01" value="1299.00" required /></label>
+          <label>Currency <input name="currency" value="INR" maxlength="3" required /></label>
+          <label>Idempotency Key <input name="idempotencyKey" value="idem-001" required /></label>
+          <label>Webhook URL <input name="webhookUrl" value="https://merchant.example/webhook/payment" required /></label>
+          <label>Max Retries <input name="maxRetries" type="number" min="0" max="6" value="3" required /></label>
+          <label>Merchant API Key <input name="apiKey" value="m_demo_merchant_key" required /></label>
+          <button type="submit">Create Payment</button>
+        </form>
+      </article>
+
+      <article class="card">
+        <h2>Fetch Payment</h2>
+        <form id="getPaymentForm">
+          <label>Payment ID <input name="paymentId" type="number" value="1" required /></label>
+          <label>Merchant API Key <input name="apiKey" value="m_demo_merchant_key" required /></label>
+          <button type="submit">Get Payment</button>
+        </form>
+
+        <h2>Force Retry</h2>
+        <form id="forceRetryForm">
+          <label>Payment ID <input name="paymentId" type="number" value="1" required /></label>
+          <label>Merchant API Key <input name="apiKey" value="m_demo_merchant_key" required /></label>
+          <button type="submit">Force Retry</button>
+        </form>
+      </article>
+
+      <article class="card">
+        <h2>Admin Reconciliation</h2>
+        <form id="reconcileForm">
+          <label>Merchant ID <input name="merchantId" type="number" value="1" required /></label>
+          <label>Admin Key <input name="adminKey" value="admin_secret_123" required /></label>
+          <button type="submit">Run Reconciliation</button>
+        </form>
+
+        <h2>Dead-letter Webhooks</h2>
+        <form id="deadLetterForm">
+          <label>Admin Key <input name="adminKey" value="admin_secret_123" required /></label>
+          <button type="submit">Fetch Dead-letter Events</button>
+        </form>
+      </article>
+    </section>
+
+    <section class="card output-card">
+      <div class="output-head">
+        <h2>Response</h2>
+        <button id="clearBtn" type="button" class="ghost">Clear</button>
+      </div>
+      <pre id="output">Run any action to see API response.</pre>
+    </section>
+  </main>
+
+  <script src="/app/app.js"></script>
+</body>
+</html>

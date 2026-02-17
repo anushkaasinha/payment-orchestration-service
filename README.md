@@ -98,6 +98,18 @@ curl -X POST http://localhost:8080/api/v1/merchant/payments/1/force-retry \
 mvn spring-boot:run
 ```
 
+## Web UI (Frontend Attached)
+A lightweight frontend is bundled into Spring Boot static assets.
+
+- Open: `http://localhost:8080/app/` (or your active port, e.g. `8082`)
+- No separate React build is required; it is served directly by this backend.
+- The UI lets you:
+- create payment
+- fetch payment
+- force retry
+- run reconciliation
+- inspect dead-letter webhooks
+
 ## Run Tests
 ```bash
 mvn test
