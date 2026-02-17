@@ -1,0 +1,6 @@
+spring:
+  task:
+    scheduling:
+      enabled: false
+security:
+  admin-key: admin_secret_123
