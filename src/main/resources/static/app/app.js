@@ -1,4 +1,5 @@
 const output = document.getElementById("output");
+output.textContent = "UI ready. Run any action to see API response.";
 
 function show(title, data) {
   output.textContent = `${title}\n\n${typeof data === "string" ? data : JSON.stringify(data, null, 2)}`;
@@ -10,7 +11,14 @@ function showError(title, err, status) {
 }
 
 async function callApi(url, options = {}) {
-  const res = await fetch(url, options);
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 12000);
+  let res;
+  try {
+    res = await fetch(url, { ...options, signal: controller.signal });
+  } finally {
+    clearTimeout(timeout);
+  }
   const text = await res.text();
   let parsed = text;
   try {
@@ -29,6 +37,7 @@ document.getElementById("clearBtn").addEventListener("click", () => {
 
 document.getElementById("createPaymentForm").addEventListener("submit", async (e) => {
   e.preventDefault();
+  show("Create Payment", "Request in progress...");
   const fd = new FormData(e.target);
   const body = {
     orderId: fd.get("orderId"),
@@ -50,12 +59,13 @@ document.getElementById("createPaymentForm").addEventListener("submit", async (e
     });
     show("Create Payment: OK", data);
   } catch (e2) {
-    showError("Create Payment: FAILED", e2.body ?? e2, e2.status);
+    showError("Create Payment: FAILED", e2.body ?? e2.message ?? e2, e2.status);
   }
 });
 
 document.getElementById("getPaymentForm").addEventListener("submit", async (e) => {
   e.preventDefault();
+  show("Get Payment", "Request in progress...");
   const fd = new FormData(e.target);
   const id = fd.get("paymentId");
   const key = fd.get("apiKey");
@@ -65,12 +75,13 @@ document.getElementById("getPaymentForm").addEventListener("submit", async (e) =
     });
     show("Get Payment: OK", data);
   } catch (e2) {
-    showError("Get Payment: FAILED", e2.body ?? e2, e2.status);
+    showError("Get Payment: FAILED", e2.body ?? e2.message ?? e2, e2.status);
   }
 });
 
 document.getElementById("forceRetryForm").addEventListener("submit", async (e) => {
   e.preventDefault();
+  show("Force Retry", "Request in progress...");
   const fd = new FormData(e.target);
   const id = fd.get("paymentId");
   const key = fd.get("apiKey");
@@ -81,12 +92,13 @@ document.getElementById("forceRetryForm").addEventListener("submit", async (e) =
     });
     show("Force Retry: OK", data);
   } catch (e2) {
-    showError("Force Retry: FAILED", e2.body ?? e2, e2.status);
+    showError("Force Retry: FAILED", e2.body ?? e2.message ?? e2, e2.status);
   }
 });
 
 document.getElementById("reconcileForm").addEventListener("submit", async (e) => {
   e.preventDefault();
+  show("Reconciliation", "Request in progress...");
   const fd = new FormData(e.target);
   const merchantId = fd.get("merchantId");
   const adminKey = fd.get("adminKey");
@@ -96,12 +108,13 @@ document.getElementById("reconcileForm").addEventListener("submit", async (e) =>
     });
     show("Reconciliation: OK", data);
   } catch (e2) {
-    showError("Reconciliation: FAILED", e2.body ?? e2, e2.status);
+    showError("Reconciliation: FAILED", e2.body ?? e2.message ?? e2, e2.status);
   }
 });
 
 document.getElementById("deadLetterForm").addEventListener("submit", async (e) => {
   e.preventDefault();
+  show("Dead-letter Webhooks", "Request in progress...");
   const fd = new FormData(e.target);
   const adminKey = fd.get("adminKey");
   try {
@@ -110,6 +123,6 @@ document.getElementById("deadLetterForm").addEventListener("submit", async (e) =
     });
     show("Dead-letter Webhooks: OK", data);
   } catch (e2) {
-    showError("Dead-letter Webhooks: FAILED", e2.body ?? e2, e2.status);
+    showError("Dead-letter Webhooks: FAILED", e2.body ?? e2.message ?? e2, e2.status);
   }
 });
