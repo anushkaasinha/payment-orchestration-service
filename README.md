@@ -117,10 +117,13 @@ mvn test
 ## Screenshots
 
 ### Dashboard
-![Dashboard](https://github.com/user-attachments/assets/10f75508-d760-4e29-ba54-2d79af3d0565)
+![Dashboard](<img width="1470" height="956" alt="Screenshot 2026-02-17 at 12 07 22 PM" src="https://github.com/user-attachments/assets/f1a27bf2-6b82-4079-99a1-b750b082d950" />
+)
 
 ### Response Panel (Create Payment Success)
-![Create Payment Response](https://github.com/user-attachments/assets/ab16edae-add7-4299-99e3-e4ca1545fe7d)
+![Create Payment Response](<img width="1470" height="956" alt="Screenshot 2026-02-17 at 12 09 48 PM" src="https://github.com/user-attachments/assets/c9f28246-fdbb-4e83-b70d-944d02f0a648" />
+)
+
 
 
 
