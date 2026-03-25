@@ -1,16 +1,20 @@
 # Payment Orchestration Service (Spring Boot)
 
-A backend-heavy, resume-grade project that models payment orchestration used in fintech and large-scale commerce systems.
+A backend-heavy system that models how real-world payment orchestration works in fintech and large-scale commerce platforms.
 
-This project is designed to showcase the kind of backend engineering expected in companies like Razorpay, Amazon, and Google:
-- idempotent payment APIs
-- retry orchestration with exponential backoff
-- webhook delivery engine with dead-letter queue behavior
-- ledger creation for reconciliation
-- API-key based auth (merchant + admin)
-- validation, global exception handling, and automated tests
+The focus is not just on processing payments, but on handling failure scenarios, ensuring consistency, and maintaining reliability across distributed flows.
 
-## Tech Stack
+Built to reflect backend engineering patterns used in production systems at companies like Razorpay and Amazon.
+
+Core Capabilities:
+
+Idempotent payment APIs to prevent duplicate transactions
+Retry orchestration with exponential backoff for failure handling
+Webhook delivery system with dead-letter queue behavior
+Ledger creation for transaction reconciliation
+API key-based authentication (merchant + admin roles)
+Centralized validation and global exception handling
+Automated test coverage for critical flows
 - Java 21
 - Spring Boot 3
 - Spring Security
