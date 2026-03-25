@@ -9,7 +9,9 @@ Built to reflect backend engineering patterns used in production systems at comp
 Core Capabilities:
 
 Idempotent payment APIs to prevent duplicate transactions
+
 Retry orchestration with exponential backoff for failure handling
+
 Webhook delivery system with dead-letter queue behavior
 Ledger creation for transaction reconciliation
 API key-based authentication (merchant + admin roles)
