@@ -13,10 +13,15 @@ Idempotent payment APIs to prevent duplicate transactions
 Retry orchestration with exponential backoff for failure handling
 
 Webhook delivery system with dead-letter queue behavior
+
 Ledger creation for transaction reconciliation
+
 API key-based authentication (merchant + admin roles)
+
 Centralized validation and global exception handling
+
 Automated test coverage for critical flows
+
 - Java 21
 - Spring Boot 3
 - Spring Security
