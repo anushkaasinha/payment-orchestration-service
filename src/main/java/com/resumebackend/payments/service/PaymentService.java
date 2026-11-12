@@ -1,203 +1,98 @@
 package com.resumebackend.payments.service;
 
-import com.resumebackend.payments.domain.*;
-import com.resumebackend.payments.dto.CreatePaymentIntentRequest;
-import com.resumebackend.payments.dto.PaymentDetailResponse;
-import com.resumebackend.payments.exception.BadRequestException;
-import com.resumebackend.payments.exception.NotFoundException;
-import com.resumebackend.payments.repository.*;
-import com.resumebackend.payments.util.MapperUtil;
-import lombok.RequiredArgsConstructor;
+import com.resumebackend.payments.controller.Dtos.*;
+import com.resumebackend.payments.domain.Payment;
+import com.resumebackend.payments.exception.ApiException;
+import com.resumebackend.payments.repository.PaymentAttemptRepository;
+import com.resumebackend.payments.repository.PaymentRepository;
+import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
-
-import java.time.Instant;
-import java.time.temporal.ChronoUnit;
+import java.math.RoundingMode;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.util.HexFormat;
 import java.util.List;
-import java.util.Locale;
-import java.util.stream.Collectors;
+import java.util.Optional;
 
+/** Not @Transactional on purpose: the unique-constraint race on idempotency keys must be catchable here. */
 @Service
-@RequiredArgsConstructor
 public class PaymentService {
+    public record CreateResult(PaymentView payment, boolean replayed) {}
 
-    private final MerchantService merchantService;
-    private final PaymentIntentRepository paymentIntentRepository;
-    private final PaymentAttemptRepository paymentAttemptRepository;
-    private final LedgerEntryRepository ledgerEntryRepository;
-    private final WebhookEventRepository webhookEventRepository;
-    private final GatewaySimulator gatewaySimulator;
+    private final PaymentRepository payments;
+    private final PaymentAttemptRepository attempts;
+    private final PaymentProcessor processor;
 
-    @Transactional
-    public PaymentDetailResponse createAndProcess(Long merchantId, CreatePaymentIntentRequest request) {
-        Merchant merchant = merchantService.findById(merchantId);
-
-        paymentIntentRepository.findByMerchantIdAndOrderId(merchantId, request.orderId())
-                .ifPresent(existing -> {
-                    if (!existing.getIdempotencyKey().equals(request.idempotencyKey())) {
-                        throw new BadRequestException("Order already exists with a different idempotency key");
-                    }
-                });
-
-        PaymentIntent paymentIntent = paymentIntentRepository
-                .findByMerchantIdAndIdempotencyKey(merchantId, request.idempotencyKey())
-                .orElseGet(() -> paymentIntentRepository.save(PaymentIntent.builder()
-                        .merchant(merchant)
-                        .orderId(request.orderId().trim())
-                        .amount(request.amount())
-                        .currency(request.currency().trim().toUpperCase(Locale.ROOT))
-                        .status(PaymentStatus.CREATED)
-                        .attemptCount(0)
-                        .maxRetries(request.maxRetries() == null ? 3 : request.maxRetries())
-                        .idempotencyKey(request.idempotencyKey().trim())
-                        .build()));
-
-        if (paymentIntent.getStatus() == PaymentStatus.CREATED || paymentIntent.getStatus() == PaymentStatus.RETRY_SCHEDULED) {
-            attemptPayment(paymentIntent, request.webhookUrl().trim());
-        }
-
-        return getById(merchantId, paymentIntent.getId());
+    public PaymentService(PaymentRepository payments, PaymentAttemptRepository attempts, PaymentProcessor processor) {
+        this.payments = payments;
+        this.attempts = attempts;
+        this.processor = processor;
     }
 
-    @Transactional(readOnly = true)
-    public PaymentDetailResponse getById(Long merchantId, Long paymentId) {
-        PaymentIntent paymentIntent = paymentIntentRepository.findById(paymentId)
-                .filter(p -> p.getMerchant().getId().equals(merchantId))
-                .orElseThrow(() -> new NotFoundException("Payment intent not found"));
+    public CreateResult create(Long merchantId, CreatePaymentRequest req) {
+        String fingerprint = fingerprint(req);
+        Optional<Payment> existing = payments.findByMerchantIdAndIdempotencyKey(merchantId, req.idempotencyKey());
+        if (existing.isPresent()) return replay(existing.get(), fingerprint);
 
-        List<PaymentAttempt> attempts = paymentAttemptRepository.findByPaymentIntentIdOrderByAttemptedAtDesc(paymentId);
-
-        return new PaymentDetailResponse(
-                MapperUtil.toPaymentIntentResponse(paymentIntent),
-                attempts.stream().map(MapperUtil::toAttemptResponse).collect(Collectors.toList())
-        );
+        Payment p = new Payment();
+        p.setMerchantId(merchantId);
+        p.setIdempotencyKey(req.idempotencyKey());
+        p.setRequestFingerprint(fingerprint);
+        p.setOrderId(req.orderId());
+        p.setAmount(req.amount().setScale(2, RoundingMode.HALF_UP));
+        p.setCurrency(req.currency());
+        p.setWebhookUrl(req.webhookUrl());
+        p.setMaxRetries(req.maxRetries() == null ? 3 : req.maxRetries());
+        try {
+            p = payments.saveAndFlush(p);
+        } catch (DataIntegrityViolationException race) {
+            // A concurrent request with the same idempotency key won the insert: return its payment instead.
+            Payment winner = payments.findByMerchantIdAndIdempotencyKey(merchantId, req.idempotencyKey()).orElseThrow(() -> race);
+            return replay(winner, fingerprint);
+        }
+        processor.process(p.getId());
+        return new CreateResult(view(payments.findById(p.getId()).orElseThrow()), false);
     }
 
-    @Transactional
-    public void retryDuePayments() {
-        List<PaymentIntent> due = paymentIntentRepository.findTop50ByStatusInAndNextRetryAtBefore(
-                List.of(PaymentStatus.RETRY_SCHEDULED), Instant.now());
-
-        for (PaymentIntent paymentIntent : due) {
-            String fallbackWebhookUrl = webhookEventRepository.findTop5ByPaymentIntentIdOrderByCreatedAtAsc(paymentIntent.getId()).stream()
-                    .map(WebhookEvent::getDeliveryUrl)
-                    .findFirst()
-                    .orElse("https://merchant.example/webhook/payment");
-            attemptPayment(paymentIntent, fallbackWebhookUrl);
-        }
+    private CreateResult replay(Payment existing, String fingerprint) {
+        if (!existing.getRequestFingerprint().equals(fingerprint))
+            throw new ApiException(HttpStatus.CONFLICT, "IDEMPOTENCY_KEY_REUSED",
+                    "This idempotency key was already used with a different request payload");
+        return new CreateResult(view(existing), true);
     }
 
-    @Transactional
-    public PaymentDetailResponse forceRetry(Long merchantId, Long paymentId) {
-        PaymentIntent paymentIntent = paymentIntentRepository.findById(paymentId)
-                .filter(p -> p.getMerchant().getId().equals(merchantId))
-                .orElseThrow(() -> new NotFoundException("Payment intent not found"));
+    public PaymentView get(Long merchantId, Long id) { return view(owned(merchantId, id)); }
 
-        if (paymentIntent.getStatus() == PaymentStatus.SUCCEEDED) {
-            throw new BadRequestException("Succeeded payment cannot be retried");
-        }
-
-        String fallbackWebhookUrl = webhookEventRepository.findTop5ByPaymentIntentIdOrderByCreatedAtAsc(paymentIntent.getId()).stream()
-                .map(WebhookEvent::getDeliveryUrl)
-                .findFirst()
-                .orElse("https://merchant.example/webhook/payment");
-
-        attemptPayment(paymentIntent, fallbackWebhookUrl);
-        return getById(merchantId, paymentId);
+    public List<PaymentView> list(Long merchantId) {
+        return payments.findByMerchantIdOrderByIdDesc(merchantId, PageRequest.of(0, 20)).stream().map(this::view).toList();
     }
 
-    private void attemptPayment(PaymentIntent paymentIntent, String webhookUrl) {
-        paymentIntent.setStatus(PaymentStatus.PROCESSING);
-        paymentIntent.setAttemptCount(paymentIntent.getAttemptCount() + 1);
-
-        GatewayResponse gateway = gatewaySimulator.authorizeAndCapture(paymentIntent.getOrderId());
-
-        PaymentAttempt attempt = PaymentAttempt.builder()
-                .paymentIntent(paymentIntent)
-                .gateway("mock-gateway")
-                .gatewayReference("gw_" + Instant.now().toEpochMilli())
-                .status(resolveAttemptStatus(gateway))
-                .errorCode(gateway.success() ? null : gateway.code())
-                .errorMessage(gateway.success() ? null : gateway.message())
-                .latencyMs(gateway.latencyMs())
-                .attemptedAt(Instant.now())
-                .build();
-        paymentAttemptRepository.save(attempt);
-
-        if (gateway.success()) {
-            paymentIntent.setStatus(PaymentStatus.SUCCEEDED);
-            paymentIntent.setNextRetryAt(null);
-            paymentIntent.setLastFailureReason(null);
-
-            ledgerEntryRepository.save(LedgerEntry.builder()
-                    .paymentIntent(paymentIntent)
-                    .type(LedgerEntryType.DEBIT)
-                    .amount(paymentIntent.getAmount())
-                    .description("Debit customer wallet")
-                    .createdAt(Instant.now())
-                    .build());
-
-            ledgerEntryRepository.save(LedgerEntry.builder()
-                    .paymentIntent(paymentIntent)
-                    .type(LedgerEntryType.CREDIT)
-                    .amount(paymentIntent.getAmount())
-                    .description("Credit merchant settlement")
-                    .createdAt(Instant.now())
-                    .build());
-
-            webhookEventRepository.save(WebhookEvent.builder()
-                    .paymentIntent(paymentIntent)
-                    .eventType("PAYMENT_SUCCEEDED")
-                    .deliveryUrl(webhookUrl)
-                    .payload(buildPayload(paymentIntent))
-                    .status(WebhookStatus.PENDING)
-                    .retryCount(0)
-                    .maxRetries(5)
-                    .nextRetryAt(Instant.now())
-                    .build());
-
-            paymentIntentRepository.save(paymentIntent);
-            return;
-        }
-
-        paymentIntent.setLastFailureReason(gateway.code() + ": " + gateway.message());
-
-        boolean retriesAvailable = paymentIntent.getAttemptCount() <= paymentIntent.getMaxRetries();
-        if (gateway.transientFailure() && retriesAvailable) {
-            long backoffSeconds = Math.min((long) Math.pow(2, paymentIntent.getAttemptCount()), 60);
-            paymentIntent.setStatus(PaymentStatus.RETRY_SCHEDULED);
-            paymentIntent.setNextRetryAt(Instant.now().plus(backoffSeconds, ChronoUnit.SECONDS));
-        } else {
-            paymentIntent.setStatus(gateway.transientFailure() ? PaymentStatus.EXHAUSTED : PaymentStatus.FAILED);
-            paymentIntent.setNextRetryAt(null);
-
-            webhookEventRepository.save(WebhookEvent.builder()
-                    .paymentIntent(paymentIntent)
-                    .eventType("PAYMENT_FAILED")
-                    .deliveryUrl(webhookUrl)
-                    .payload(buildPayload(paymentIntent))
-                    .status(WebhookStatus.PENDING)
-                    .retryCount(0)
-                    .maxRetries(5)
-                    .nextRetryAt(Instant.now())
-                    .build());
-        }
-
-        paymentIntentRepository.save(paymentIntent);
+    public PaymentView forceRetry(Long merchantId, Long id) {
+        owned(merchantId, id);
+        processor.forceRetry(id);
+        return view(payments.findById(id).orElseThrow());
     }
 
-    private String buildPayload(PaymentIntent paymentIntent) {
-        return "{\"paymentId\":" + paymentIntent.getId() +
-                ",\"orderId\":\"" + paymentIntent.getOrderId() + "\"" +
-                ",\"status\":\"" + paymentIntent.getStatus().name() + "\"" +
-                ",\"amount\":" + paymentIntent.getAmount() +
-                ",\"currency\":\"" + paymentIntent.getCurrency() + "\"}";
+    private Payment owned(Long merchantId, Long id) {
+        return payments.findById(id).filter(p -> p.getMerchantId().equals(merchantId))
+                .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "PAYMENT_NOT_FOUND", "No payment " + id));
     }
 
-    private AttemptStatus resolveAttemptStatus(GatewayResponse response) {
-        if (response.success()) {
-            return AttemptStatus.SUCCESS;
-        }
-        return response.transientFailure() ? AttemptStatus.SOFT_FAILURE : AttemptStatus.HARD_FAILURE;
+    private PaymentView view(Payment p) {
+        List<AttemptView> a = attempts.findByPaymentIdOrderByIdAsc(p.getId()).stream()
+                .map(x -> new AttemptView(x.getAttemptNo(), x.getGateway(), x.getOutcome(), x.getCode(), x.getMessage(),
+                        x.getLatencyMs(), x.getCreatedAt())).toList();
+        return new PaymentView(p.getId(), p.getOrderId(), p.getAmount(), p.getCurrency(), p.getStatus(), p.getGateway(),
+                p.getGatewayReference(), p.getRetryCount(), p.getMaxRetries(), p.getNextRetryAt(), p.getFailureReason(),
+                p.getCreatedAt(), a);
+    }
+
+    private static String fingerprint(CreatePaymentRequest r) {
+        try {
+            String raw = r.orderId() + "|" + r.amount().setScale(2, RoundingMode.HALF_UP) + "|" + r.currency() + "|" + r.webhookUrl();
+            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(raw.getBytes(StandardCharsets.UTF_8)));
+        } catch (Exception e) { throw new IllegalStateException(e); }
     }
 }

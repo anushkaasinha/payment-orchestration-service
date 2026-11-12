@@ -1,38 +1,51 @@
 package com.resumebackend.payments.controller;
 
-import com.resumebackend.payments.dto.*;
+import com.resumebackend.payments.controller.Dtos.*;
+import com.resumebackend.payments.domain.GatewayName;
+import com.resumebackend.payments.gateway.GatewayRegistry;
 import com.resumebackend.payments.service.MerchantService;
 import com.resumebackend.payments.service.ReconciliationService;
 import com.resumebackend.payments.service.WebhookService;
 import jakarta.validation.Valid;
-import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
-import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
-
 import java.util.List;
+import java.util.Map;
 
 @RestController
 @RequestMapping("/api/v1/admin")
-@RequiredArgsConstructor
 public class AdminController {
+    private final MerchantService merchants;
+    private final ReconciliationService reconciliation;
+    private final WebhookService webhooks;
+    private final GatewayRegistry gateways;
 
-    private final MerchantService merchantService;
-    private final ReconciliationService reconciliationService;
-    private final WebhookService webhookService;
-
-    @PostMapping("/merchants")
-    public ResponseEntity<MerchantResponse> createMerchant(@RequestBody @Valid CreateMerchantRequest request) {
-        return ResponseEntity.status(HttpStatus.CREATED).body(merchantService.create(request));
+    public AdminController(MerchantService merchants, ReconciliationService reconciliation,
+                           WebhookService webhooks, GatewayRegistry gateways) {
+        this.merchants = merchants;
+        this.reconciliation = reconciliation;
+        this.webhooks = webhooks;
+        this.gateways = gateways;
     }
+
+    @PostMapping("/merchants") @ResponseStatus(HttpStatus.CREATED)
+    public MerchantResponse createMerchant(@Valid @RequestBody CreateMerchantRequest req) { return merchants.create(req.name()); }
 
     @GetMapping("/reconciliation/{merchantId}")
-    public ResponseEntity<ReconciliationResponse> reconcile(@PathVariable Long merchantId) {
-        return ResponseEntity.ok(reconciliationService.reconcileMerchant(merchantId));
-    }
+    public ReconciliationView reconcile(@PathVariable Long merchantId) { return reconciliation.reconcile(merchantId); }
 
     @GetMapping("/webhooks/dead-letter")
-    public ResponseEntity<List<WebhookEventResponse>> deadLetter() {
-        return ResponseEntity.ok(webhookService.deadLetterEvents());
+    public List<WebhookView> deadLetters() { return webhooks.deadLetters(); }
+
+    @PostMapping("/webhooks/{id}/replay")
+    public WebhookView replay(@PathVariable Long id) { return webhooks.replay(id); }
+
+    @GetMapping("/gateways")
+    public List<Map<String, Object>> gateways() { return gateways.snapshot(); }
+
+    @PutMapping("/gateways/{name}")
+    public List<Map<String, Object>> setMode(@PathVariable GatewayName name, @Valid @RequestBody GatewayModeRequest req) {
+        gateways.setMode(name, req.mode());
+        return gateways.snapshot();
     }
 }

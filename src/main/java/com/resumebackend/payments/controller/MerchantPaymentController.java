@@ -1,38 +1,38 @@
 package com.resumebackend.payments.controller;
 
-import com.resumebackend.payments.dto.CreatePaymentIntentRequest;
-import com.resumebackend.payments.dto.PaymentDetailResponse;
-import com.resumebackend.payments.service.CurrentAuthService;
+import com.resumebackend.payments.controller.Dtos.*;
+import com.resumebackend.payments.security.MerchantPrincipal;
 import com.resumebackend.payments.service.PaymentService;
 import jakarta.validation.Valid;
-import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
+import java.util.List;
 
 @RestController
 @RequestMapping("/api/v1/merchant/payments")
-@RequiredArgsConstructor
 public class MerchantPaymentController {
+    private final PaymentService service;
 
-    private final CurrentAuthService currentAuthService;
-    private final PaymentService paymentService;
+    public MerchantPaymentController(PaymentService service) { this.service = service; }
 
     @PostMapping
-    public ResponseEntity<PaymentDetailResponse> create(@RequestBody @Valid CreatePaymentIntentRequest request) {
-        Long merchantId = currentAuthService.merchantId();
-        return ResponseEntity.status(HttpStatus.CREATED).body(paymentService.createAndProcess(merchantId, request));
+    public ResponseEntity<PaymentView> create(@AuthenticationPrincipal MerchantPrincipal me, @Valid @RequestBody CreatePaymentRequest req) {
+        PaymentService.CreateResult r = service.create(me.id(), req);
+        ResponseEntity.BodyBuilder b = ResponseEntity.status(r.replayed() ? HttpStatus.OK : HttpStatus.CREATED);
+        if (r.replayed()) b.header("Idempotent-Replayed", "true");
+        return b.body(r.payment());
     }
 
-    @GetMapping("/{paymentId}")
-    public ResponseEntity<PaymentDetailResponse> getById(@PathVariable Long paymentId) {
-        Long merchantId = currentAuthService.merchantId();
-        return ResponseEntity.ok(paymentService.getById(merchantId, paymentId));
-    }
+    @GetMapping
+    public List<PaymentView> list(@AuthenticationPrincipal MerchantPrincipal me) { return service.list(me.id()); }
 
-    @PostMapping("/{paymentId}/force-retry")
-    public ResponseEntity<PaymentDetailResponse> forceRetry(@PathVariable Long paymentId) {
-        Long merchantId = currentAuthService.merchantId();
-        return ResponseEntity.ok(paymentService.forceRetry(merchantId, paymentId));
+    @GetMapping("/{id}")
+    public PaymentView get(@AuthenticationPrincipal MerchantPrincipal me, @PathVariable Long id) { return service.get(me.id(), id); }
+
+    @PostMapping("/{id}/force-retry")
+    public PaymentView forceRetry(@AuthenticationPrincipal MerchantPrincipal me, @PathVariable Long id) {
+        return service.forceRetry(me.id(), id);
     }
 }

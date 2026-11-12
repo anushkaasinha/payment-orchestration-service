@@ -1,42 +1,31 @@
 package com.resumebackend.payments.service;
 
+import com.resumebackend.payments.controller.Dtos.MerchantResponse;
 import com.resumebackend.payments.domain.Merchant;
-import com.resumebackend.payments.dto.CreateMerchantRequest;
-import com.resumebackend.payments.dto.MerchantResponse;
-import com.resumebackend.payments.exception.BadRequestException;
 import com.resumebackend.payments.repository.MerchantRepository;
-import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
-
-import java.util.UUID;
+import java.security.SecureRandom;
+import java.util.HexFormat;
 
 @Service
-@RequiredArgsConstructor
 public class MerchantService {
+    private final MerchantRepository merchants;
+    private final SecureRandom random = new SecureRandom();
 
-    private final MerchantRepository merchantRepository;
+    public MerchantService(MerchantRepository merchants) { this.merchants = merchants; }
 
-    @Transactional
-    public MerchantResponse create(CreateMerchantRequest request) {
-        String apiKey = "m_" + UUID.randomUUID().toString().replace("-", "");
-
-        while (merchantRepository.findByApiKey(apiKey).isPresent()) {
-            apiKey = "m_" + UUID.randomUUID().toString().replace("-", "");
-        }
-
-        Merchant merchant = Merchant.builder()
-                .name(request.name().trim())
-                .apiKey(apiKey)
-                .build();
-
-        Merchant saved = merchantRepository.save(merchant);
-        return new MerchantResponse(saved.getId(), saved.getName(), saved.getApiKey());
+    public MerchantResponse create(String name) {
+        Merchant m = new Merchant();
+        m.setName(name);
+        m.setApiKey("mk_" + token(16));
+        m.setWebhookSecret("whsec_" + token(16));
+        m = merchants.save(m);
+        return new MerchantResponse(m.getId(), m.getName(), m.getApiKey(), m.getCreatedAt());
     }
 
-    @Transactional(readOnly = true)
-    public Merchant findById(Long merchantId) {
-        return merchantRepository.findById(merchantId)
-                .orElseThrow(() -> new BadRequestException("Merchant does not exist"));
+    private String token(int bytes) {
+        byte[] b = new byte[bytes];
+        random.nextBytes(b);
+        return HexFormat.of().formatHex(b);
     }
 }

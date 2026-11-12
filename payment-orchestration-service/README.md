@@ -1,0 +1,148 @@
+# Payment Orchestration Service (Spring Boot)
+
+A backend-heavy system that models how real-world payment orchestration works in fintech and large-scale commerce platforms.
+
+The focus is not just on processing payments, but on handling failure scenarios, ensuring consistency, and maintaining reliability across distributed flows.
+
+Built to reflect backend engineering patterns used in production systems at companies like Razorpay and Amazon.
+
+Core Capabilities:
+
+Idempotent payment APIs to prevent duplicate transactions
+
+Retry orchestration with exponential backoff for failure handling
+
+Webhook delivery system with dead-letter queue behavior
+
+Ledger creation for transaction reconciliation
+
+API key-based authentication (merchant + admin roles)
+
+Centralized validation and global exception handling
+
+Automated test coverage for critical flows
+
+- Java 21
+- Spring Boot 3
+- Spring Security
+- Spring Data JPA (Hibernate)
+- H2 (in-memory DB)
+- Maven
+- JUnit 5 + MockMvc
+
+## High-Level Architecture
+- `Merchant APIs` create/query/retry payments
+- `GatewaySimulator` simulates success / transient / hard failures
+- `Payment Retry Scheduler` reprocesses due payments
+- `Webhook Dispatcher` retries outbound webhook events and pushes irrecoverable events to dead-letter status
+- `Ledger Entries` (DEBIT/CREDIT) are generated for successful captures
+- `Admin APIs` onboard merchants, run reconciliation, inspect dead-letter webhooks
+
+## Project Structure
+- `/src/main/java/com/resumebackend/payments/controller` -> REST APIs
+- `/src/main/java/com/resumebackend/payments/service` -> business logic + schedulers
+- `/src/main/java/com/resumebackend/payments/domain` -> entities and enums
+- `/src/main/java/com/resumebackend/payments/repository` -> JPA repositories
+- `/src/main/java/com/resumebackend/payments/security` -> API key auth filter + principal
+- `/src/main/java/com/resumebackend/payments/exception` -> centralized exception handling
+- `/src/test/java/com/resumebackend/payments` -> tests
+
+## Security Model
+- Admin endpoints: header `X-ADMIN-KEY`
+- Merchant endpoints: header `X-API-KEY`
+
+Default values (`application.yml`):
+- Admin key: `admin_secret_123`
+- Seed merchant API key: `m_demo_merchant_key`
+
+## API Endpoints
+
+### Admin
+- `POST /api/v1/admin/merchants` -> create merchant
+- `GET /api/v1/admin/reconciliation/{merchantId}` -> summary settlement view
+- `GET /api/v1/admin/webhooks/dead-letter` -> inspect failed webhooks
+
+### Merchant
+- `POST /api/v1/merchant/payments` -> create + process payment intent
+- `GET /api/v1/merchant/payments/{paymentId}` -> payment details + attempt history
+- `POST /api/v1/merchant/payments/{paymentId}/force-retry` -> manual retry
+
+## Example Flow
+
+### 1. Create merchant (admin)
+```bash
+curl -X POST http://localhost:8080/api/v1/admin/merchants \
+  -H "X-ADMIN-KEY: admin_secret_123" \
+  -H "Content-Type: application/json" \
+  -d '{"name":"Acme Corp"}'
+```
+
+### 2. Create payment (merchant)
+```bash
+curl -X POST http://localhost:8080/api/v1/merchant/payments \
+  -H "X-API-KEY: m_demo_merchant_key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "orderId": "ORD-2026-001",
+    "amount": 1299.00,
+    "currency": "INR",
+    "idempotencyKey": "idem-2026-001",
+    "webhookUrl": "https://merchant.example/webhook/payment",
+    "maxRetries": 3
+  }'
+```
+
+### 3. Query payment
+```bash
+curl http://localhost:8080/api/v1/merchant/payments/1 \
+  -H "X-API-KEY: m_demo_merchant_key"
+```
+
+### 4. Force retry (if failed/exhausted)
+```bash
+curl -X POST http://localhost:8080/api/v1/merchant/payments/1/force-retry \
+  -H "X-API-KEY: m_demo_merchant_key"
+```
+
+## Local Run
+```bash
+mvn spring-boot:run
+```
+
+## Web UI (Frontend Attached)
+A lightweight frontend is bundled into Spring Boot static assets.
+
+- Open: `http://localhost:8080/app/` (or your active port, e.g. `8082`)
+- No separate React build is required; it is served directly by this backend.
+- The UI lets you:
+- create payment
+- fetch payment
+- force retry
+- run reconciliation
+- inspect dead-letter webhooks
+
+## Run Tests
+```bash
+mvn test
+
+## Screenshots
+
+### Dashboard
+![Dashboard](<img width="1470" height="956" alt="Screenshot 2026-02-17 at 12 07 22 PM" src="https://github.com/user-attachments/assets/f1a27bf2-6b82-4079-99a1-b750b082d950" />
+)
+
+### Response Panel (Create Payment Success)
+![Create Payment Response](<img width="1470" height="956" alt="Screenshot 2026-02-17 at 12 09 48 PM" src="https://github.com/user-attachments/assets/c9f28246-fdbb-4e83-b70d-944d02f0a648" />
+)
+
+
+
+
+## Why This Project Is Strong For Resume
+- Demonstrates core payment backend patterns, not CRUD-only APIs.
+- Shows reliability engineering (idempotency, retries, backoff, DLQ-style handling).
+- Includes accounting-adjacent concepts (ledger + reconciliation).
+- Uses production-style layering, validation, security, and tests.
+
+## Suggested Resume Bullet (you can use directly)
+Built a Spring Boot payment orchestration service with idempotent APIs, automated retry workflows, webhook dispatch with dead-letter handling, and reconciliation ledger generation; improved simulated payment reliability and demonstrated production-grade backend design patterns.

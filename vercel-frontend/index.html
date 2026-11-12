@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Payment Orchestration Console</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#101418;--panel:#171c22;--line:#2a323b;--txt:#e8e4dc;--mut:#8d96a1;--ok:#5fd3a0;--warn:#f0b64a;--bad:#f06a6a;--acc:#7aa2f7;
+--sans:"IBM Plex Sans",system-ui,sans-serif;--mono:"IBM Plex Mono",ui-monospace,monospace}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--txt);font:14px/1.5 var(--sans)}
+header{display:flex;flex-wrap:wrap;gap:16px;align-items:center;justify-content:space-between;padding:16px 24px;border-bottom:1px solid var(--line)}
+h1{font-size:18px;font-weight:600;margin:0}
+h1 small{display:block;font-size:12px;font-weight:400;color:var(--mut)}
+h2{font-size:15px;font-weight:600;margin:0 0 12px}
+.keys{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.keys label{display:flex;flex-direction:column;font-size:12px;color:var(--mut);gap:2px}
+main{display:grid;grid-template-columns:minmax(300px,380px) 1fr;gap:20px;padding:20px 24px;max-width:1280px;margin:0 auto}
+@media(max-width:860px){main{grid-template-columns:1fr;padding:16px}}
+.col{display:flex;flex-direction:column;gap:20px;min-width:0}
+section{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:16px}
+input,select,button{font:inherit;color:var(--txt);background:#0d1115;border:1px solid var(--line);border-radius:4px;padding:6px 8px}
+input:focus-visible,select:focus-visible,button:focus-visible{outline:2px solid var(--acc);outline-offset:1px}
+button{cursor:pointer;background:var(--acc);color:#0b1220;border-color:var(--acc);font-weight:500}
+button.ghost{background:transparent;color:var(--txt);border-color:var(--line)}
+button:hover{filter:brightness(1.1)}
+form{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+form label{display:flex;flex-direction:column;font-size:12px;color:var(--mut);gap:2px}
+form .full{grid-column:1/-1}
+.mono{font-family:var(--mono);font-size:13px}
+.row{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 0;border-top:1px solid var(--line)}
+.row:first-of-type{border-top:0}
+.badge{display:inline-block;padding:1px 8px;border-radius:10px;font-size:12px;border:1px solid currentColor}
+.SUCCESS,.DELIVERED,.UP,.ok{color:var(--ok)}
+.RETRY_SCHEDULED,.PROCESSING,.CREATED,.FLAKY,.PENDING,.warn{color:var(--warn)}
+.FAILED,.EXHAUSTED,.DOWN,.DECLINE,.DEAD_LETTER,.bad{color:var(--bad)}
+table{width:100%;border-collapse:collapse}
+th{font-weight:500;color:var(--mut);text-align:left;font-size:12px;padding:4px 8px}
+td{padding:7px 8px;border-top:1px solid var(--line)}
+tbody tr{cursor:pointer}tbody tr:hover,tbody tr.sel{background:#1e252d}
+.scroll{overflow-x:auto}
+.rail{margin:10px 0 0;padding:0 0 0 18px;border-left:2px solid var(--line);list-style:none}
+.rail li{position:relative;padding:0 0 12px 12px}
+.rail li::before{content:"";position:absolute;left:-25px;top:6px;width:10px;height:10px;border-radius:50%;background:currentColor}
+.rail .m{color:var(--mut);font-size:12px}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;margin-top:10px}
+.stat{border:1px solid var(--line);border-radius:4px;padding:8px}.stat b{display:block;font-family:var(--mono);font-size:15px;font-weight:500}.stat span{color:var(--mut);font-size:12px}
+.empty{color:var(--mut)}
+#toast{position:fixed;right:16px;bottom:16px;max-width:380px;background:#0d1115;border:1px solid var(--line);border-left:4px solid var(--ok);padding:10px 14px;border-radius:4px;display:none}
+#toast.bad{border-left-color:var(--bad)}
+.dot{width:8px;height:8px;border-radius:50%;display:inline-block;background:currentColor;margin-right:6px}
+</style>
+</head>
+<body>
+<header>
+  <h1>Payment Orchestration Console<small>Gateway failover, idempotency, retries, webhooks and ledger on one screen</small></h1>
+  <div class="keys">
+    <span id="health" class="mut" role="status"><span class="dot warn"></span>Checking server</span>
+    <label>Merchant key<input id="merchantKey" size="22" autocomplete="off"></label>
+    <label>Admin key<input id="adminKey" type="password" size="18" autocomplete="off"></label>
+  </div>
+</header>
+<main>
+  <div class="col">
+    <section>
+      <h2>Gateways</h2>
+      <p class="empty" style="margin:0 0 6px">Requests try PAYU, then PAYTM, then STRIPE. Break one to watch traffic move.</p>
+      <div id="gateways"></div>
+    </section>
+    <section>
+      <h2>New payment</h2>
+      <form id="payForm">
+        <label>Order ID<input id="orderId" required></label>
+        <label>Amount<input id="amount" type="number" step="0.01" min="0.01" value="1299.00" required></label>
+        <label>Currency<input id="currency" value="INR" maxlength="3" required></label>
+        <label>Max retries<input id="maxRetries" type="number" min="0" max="10" value="3"></label>
+        <label class="full">Idempotency key<input id="idem" class="mono" required></label>
+        <label class="full">Webhook target
+          <select id="hook"><option value="sink">This server's receiver (delivers)</option><option value="dead">Unreachable URL (dead-letters)</option><option value="none">None</option></select>
+        </label>
+        <div class="full" style="display:flex;gap:8px"><button>Create payment</button><button type="button" class="ghost" id="newKey">New idempotency key</button></div>
+        <p class="empty full" style="margin:0">Click Create twice with the same key to see the replay.</p>
+      </form>
+    </section>
+    <section>
+      <h2>Onboard merchant</h2>
+      <form id="merForm" style="grid-template-columns:1fr auto"><input id="merName" placeholder="Acme Corp" required><button>Create merchant</button></form>
+      <div id="merOut" class="mono" style="margin-top:8px;word-break:break-all"></div>
+    </section>
+  </div>
+  <div class="col">
+    <section>
+      <h2>Payments</h2>
+      <div class="scroll"><table><thead><tr><th>ID</th><th>Order</th><th>Amount</th><th>Status</th><th>Gateway</th><th>Retries</th></tr></thead><tbody id="rows"></tbody></table></div>
+      <div id="empty" class="empty" style="display:none">No payments yet. Create one on the left.</div>
+      <div id="detail"></div>
+    </section>
+    <section>
+      <h2>Reconciliation</h2>
+      <div style="display:flex;gap:8px;align-items:center"><label>Merchant ID <input id="recMerchant" type="number" value="1" style="width:70px"></label><button id="recRun">Run reconciliation</button></div>
+      <div id="recOut"></div>
+    </section>
+    <section>
+      <h2>Dead-letter webhooks</h2>
+      <div id="dead"></div>
+    </section>
+  </div>
+</main>
+<div id="toast" role="alert"></div>
+<script>
+const $=s=>document.querySelector(s);
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const ls={get(k,d){try{return localStorage.getItem(k)||d}catch{return d}},set(k,v){try{localStorage.setItem(k,v)}catch{}}};
+$('#merchantKey').value=ls.get('mk','m_demo_merchant_key');$('#adminKey').value=ls.get('ak','admin_secret_123');
+$('#merchantKey').onchange=e=>ls.set('mk',e.target.value);$('#adminKey').onchange=e=>ls.set('ak',e.target.value);
+const rand=()=>Math.random().toString(36).slice(2,8);
+const newKey=()=>{$('#idem').value='idem-'+rand();$('#orderId').value='ORD-'+rand().toUpperCase()};newKey();$('#newKey').onclick=newKey;
+const money=(a,c)=>{try{return new Intl.NumberFormat('en-IN',{style:'currency',currency:c}).format(a)}catch{return a+' '+c}};
+let toastT;function toast(m,bad){const t=$('#toast');t.textContent=m;t.className=bad?'bad':'';t.style.display='block';clearTimeout(toastT);toastT=setTimeout(()=>t.style.display='none',4500)}
+async function api(path,{method='GET',body,admin=false}={}){
+  const h={'Content-Type':'application/json'};h[admin?'X-ADMIN-KEY':'X-API-KEY']=$(admin?'#adminKey':'#merchantKey').value;
+  const r=await fetch(path,{method,headers:h,body:body?JSON.stringify(body):undefined});
+  const t=await r.text();let d=null;try{d=t?JSON.parse(t):null}catch{}
+  if(!r.ok)throw new Error((d&&d.message)||r.status+' '+r.statusText);
+  return{data:d,status:r.status,replayed:r.headers.get('Idempotent-Replayed')==='true'};
+}
+const hint={UP:'healthy',FLAKY:'60% timeouts',DOWN:'outage',DECLINE:'issuer declines'};
+let selected=null,busy=false;
+
+async function loadGateways(){
+  const {data}=await api('/api/v1/admin/gateways',{admin:true});
+  if(document.activeElement&&document.activeElement.tagName==='SELECT')return;
+  $('#gateways').innerHTML=data.map(g=>`<div class="row"><div><span class="mono">${g.gateway}</span> ${g.circuitOpen?'<span class="badge bad">circuit open</span>':''}<div class="empty" style="font-size:12px">${hint[g.mode]}</div></div>
+  <select data-g="${g.gateway}" aria-label="${g.gateway} mode">${['UP','FLAKY','DOWN','DECLINE'].map(m=>`<option ${m===g.mode?'selected':''}>${m}</option>`).join('')}</select></div>`).join('');
+  document.querySelectorAll('[data-g]').forEach(s=>s.onchange=async()=>{
+    try{await api('/api/v1/admin/gateways/'+s.dataset.g,{method:'PUT',admin:true,body:{mode:s.value}});toast(s.dataset.g+' set to '+s.value);loadGateways()}catch(e){toast(e.message,true)}});
+}
+async function loadPayments(){
+  const {data}=await api('/api/v1/merchant/payments');
+  $('#empty').style.display=data.length?'none':'block';
+  $('#rows').innerHTML=data.map(p=>`<tr data-id="${p.id}" class="${p.id===selected?'sel':''}"><td class="mono">#${p.id}</td><td class="mono">${esc(p.orderId)}</td><td class="mono">${money(p.amount,p.currency)}</td>
+   <td><span class="badge ${p.status}">${p.status}</span></td><td>${p.gateway||'-'}</td><td class="mono">${p.retryCount}/${p.maxRetries}</td></tr>`).join('');
+  document.querySelectorAll('#rows tr').forEach(r=>r.onclick=()=>{selected=+r.dataset.id;loadPayments()});
+  const p=data.find(x=>x.id===selected);renderDetail(p);
+}
+function renderDetail(p){
+  if(!p){$('#detail').innerHTML='';return}
+  const next=p.nextRetryAt?`<span class="warn">Next retry ${new Date(p.nextRetryAt).toLocaleTimeString()}</span>`:'';
+  $('#detail').innerHTML=`<h2 style="margin-top:18px">Payment #${p.id} routing history</h2>
+  <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap"><span class="badge ${p.status}">${p.status}</span>${p.gatewayReference?`<span class="mono">${esc(p.gatewayReference)}</span>`:''}${next}
+  ${['FAILED','EXHAUSTED','RETRY_SCHEDULED','CREATED'].includes(p.status)?'<button id="retry">Force retry</button>':''}</div>
+  ${p.failureReason?`<p class="empty">${esc(p.failureReason)}</p>`:''}
+  <ul class="rail">${p.attempts.map(a=>`<li class="${a.outcome==='SUCCESS'?'ok':a.outcome==='HARD_FAILURE'?'bad':a.outcome==='SKIPPED'?'':'warn'}"><span style="color:var(--txt)"><b>${a.gateway}</b> ${a.outcome.replace('_',' ').toLowerCase()}</span><div class="m">attempt ${a.attemptNo}, ${a.latencyMs} ms, ${esc(a.message)}</div></li>`).join('')}</ul>`;
+  const b=$('#retry');if(b)b.onclick=async()=>{try{const {data}=await api('/api/v1/merchant/payments/'+p.id+'/force-retry',{method:'POST'});toast('Retry finished: '+data.status,data.status!=='SUCCESS');loadPayments()}catch(e){toast(e.message,true)}};
+}
+async function loadDead(){
+  const {data}=await api('/api/v1/admin/webhooks/dead-letter',{admin:true});
+  $('#dead').innerHTML=data.length?data.map(w=>`<div class="row"><div style="min-width:0"><span class="mono">#${w.id}</span> payment #${w.paymentId} <span class="badge ${w.status}">${w.eventType}</span>
+   <div class="empty" style="font-size:12px;word-break:break-all">${esc(w.url)}<br>${w.attempts} attempts, last error: ${esc(w.lastError)}</div></div><button class="ghost" data-w="${w.id}">Replay</button></div>`).join('')
+   :'<p class="empty">Nothing here. Create a payment with the unreachable webhook target; it lands here after 5 failed deliveries (about 30 seconds).</p>';
+  document.querySelectorAll('[data-w]').forEach(b=>b.onclick=async()=>{try{await api('/api/v1/admin/webhooks/'+b.dataset.w+'/replay',{method:'POST',admin:true});toast('Webhook queued for redelivery');loadDead()}catch(e){toast(e.message,true)}});
+}
+$('#payForm').onsubmit=async e=>{
+  e.preventDefault();
+  const h=$('#hook').value;const body={orderId:$('#orderId').value,amount:+$('#amount').value,currency:$('#currency').value.toUpperCase(),idempotencyKey:$('#idem').value,maxRetries:+$('#maxRetries').value};
+  if(h==='sink')body.webhookUrl=location.origin+'/webhook-sink';if(h==='dead')body.webhookUrl='https://merchant.invalid/webhook/payment';
+  try{const r=await api('/api/v1/merchant/payments',{method:'POST',body});selected=r.data.id;
+    toast(r.replayed?`Replayed: key already used, returned payment #${r.data.id} without charging again`:`Payment #${r.data.id} is ${r.data.status}${r.data.gateway?' via '+r.data.gateway:''}`,!r.replayed&&r.data.status!=='SUCCESS'&&r.data.status!=='RETRY_SCHEDULED');
+    loadPayments()}catch(err){toast(err.message,true)}
+};
+$('#merForm').onsubmit=async e=>{e.preventDefault();try{const {data}=await api('/api/v1/admin/merchants',{method:'POST',admin:true,body:{name:$('#merName').value}});
+  $('#merOut').textContent=`Merchant #${data.id}. API key: ${data.apiKey}`;toast('Merchant created')}catch(err){toast(err.message,true)}};
+$('#recRun').onclick=async()=>{try{const {data:d}=await api('/api/v1/admin/reconciliation/'+$('#recMerchant').value,{admin:true});
+  const s=(l,v)=>`<div class="stat"><b>${v}</b><span>${l}</span></div>`;const f=n=>Number(n).toFixed(2);
+  $('#recOut').innerHTML=`<p><span class="badge ${d.balanced?'ok':'bad'}">${d.balanced?'Ledger balanced':'Ledger mismatch'}</span> ${esc(d.merchantName)}</p>
+  <div class="stats">${s('Captured',f(d.capturedAmount))}${s('Platform fees',f(d.platformFees))}${s('Net settlement',f(d.netSettlement))}${s('Debits',f(d.debitTotal))}${s('Credits',f(d.creditTotal))}${s('Ledger entries',d.ledgerEntries)}</div>
+  <p class="empty">By status: ${esc(JSON.stringify(d.paymentsByStatus))}<br>Successes by gateway: ${esc(JSON.stringify(d.successByGateway))}${d.successWithoutLedger.length?'<br>Missing ledger: '+d.successWithoutLedger.join(', '):''}</p>`}catch(e){toast(e.message,true)}};
+
+async function health(){
+  try{const r=await fetch('/actuator/health');$('#health').innerHTML=r.ok?'<span class="dot ok"></span>Server up':'<span class="dot bad"></span>Server error'}
+  catch{$('#health').innerHTML='<span class="dot warn"></span>Waking server, give it a minute'}
+}
+async function refresh(){if(busy)return;busy=true;try{await Promise.all([loadGateways(),loadPayments(),loadDead()])}catch(e){if(!/401|403/.test(e.message))console.warn(e.message);else toast('Check your keys: '+e.message,true)}busy=false}
+health();refresh();setInterval(refresh,2500);setInterval(health,15000);
+</script>
+</body>
+</html>

@@ -1,57 +1,53 @@
 package com.resumebackend.payments.exception;
 
-import com.resumebackend.payments.dto.ApiError;
-import jakarta.servlet.http.HttpServletRequest;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.HttpStatusCode;
 import org.springframework.http.ResponseEntity;
-import org.springframework.validation.FieldError;
+import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
-import org.springframework.web.servlet.resource.NoResourceFoundException;
-
+import org.springframework.web.context.request.WebRequest;
+import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExceptionHandler;
 import java.time.Instant;
 import java.util.stream.Collectors;
 
+@Slf4j
 @RestControllerAdvice
-public class GlobalExceptionHandler {
+public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
+    public record ErrorBody(String code, String message, Instant timestamp) {}
 
-    @ExceptionHandler(NotFoundException.class)
-    public ResponseEntity<ApiError> handleNotFound(NotFoundException ex, HttpServletRequest request) {
-        return build(HttpStatus.NOT_FOUND, ex.getMessage(), request.getRequestURI());
+    private static ResponseEntity<Object> body(HttpStatusCode status, String code, String message) {
+        return ResponseEntity.status(status).body(new ErrorBody(code, message, Instant.now()));
     }
 
-    @ExceptionHandler(UnauthorizedException.class)
-    public ResponseEntity<ApiError> handleUnauthorized(UnauthorizedException ex, HttpServletRequest request) {
-        return build(HttpStatus.UNAUTHORIZED, ex.getMessage(), request.getRequestURI());
-    }
+    @ExceptionHandler(ApiException.class)
+    ResponseEntity<Object> api(ApiException e) { return body(e.getStatus(), e.getCode(), e.getMessage()); }
 
-    @ExceptionHandler(BadRequestException.class)
-    public ResponseEntity<ApiError> handleBadRequest(BadRequestException ex, HttpServletRequest request) {
-        return build(HttpStatus.BAD_REQUEST, ex.getMessage(), request.getRequestURI());
-    }
-
-    @ExceptionHandler(MethodArgumentNotValidException.class)
-    public ResponseEntity<ApiError> handleValidation(MethodArgumentNotValidException ex, HttpServletRequest request) {
-        String message = ex.getBindingResult().getFieldErrors().stream()
-                .map(FieldError::getField)
-                .distinct()
-                .collect(Collectors.joining(", "));
-        return build(HttpStatus.BAD_REQUEST, "Validation failed for fields: " + message, request.getRequestURI());
-    }
-
-    @ExceptionHandler(NoResourceFoundException.class)
-    public ResponseEntity<ApiError> handleNoResource(NoResourceFoundException ex, HttpServletRequest request) {
-        return build(HttpStatus.NOT_FOUND, "Resource not found", request.getRequestURI());
+    @ExceptionHandler(ObjectOptimisticLockingFailureException.class)
+    ResponseEntity<Object> conflict(ObjectOptimisticLockingFailureException e) {
+        return body(HttpStatus.CONFLICT, "CONCURRENT_MODIFICATION", "Payment is being processed by another worker, retry shortly");
     }
 
     @ExceptionHandler(Exception.class)
-    public ResponseEntity<ApiError> handleGeneric(Exception ex, HttpServletRequest request) {
-        return build(HttpStatus.INTERNAL_SERVER_ERROR, "Unexpected server error", request.getRequestURI());
+    ResponseEntity<Object> other(Exception e) {
+        log.error("Unhandled error", e);
+        return body(HttpStatus.INTERNAL_SERVER_ERROR, "INTERNAL_ERROR", "Unexpected error");
     }
 
-    private ResponseEntity<ApiError> build(HttpStatus status, String message, String path) {
-        ApiError body = new ApiError(Instant.now(), status.value(), status.getReasonPhrase(), message, path);
-        return ResponseEntity.status(status).body(body);
+    @Override
+    protected ResponseEntity<Object> handleMethodArgumentNotValid(MethodArgumentNotValidException ex, HttpHeaders headers,
+                                                                  HttpStatusCode status, WebRequest request) {
+        String msg = ex.getBindingResult().getFieldErrors().stream()
+                .map(f -> f.getField() + " " + f.getDefaultMessage()).collect(Collectors.joining("; "));
+        return body(HttpStatus.BAD_REQUEST, "VALIDATION_ERROR", msg);
+    }
+
+    @Override
+    protected ResponseEntity<Object> handleExceptionInternal(Exception ex, Object b, HttpHeaders headers,
+                                                             HttpStatusCode status, WebRequest request) {
+        return body(status, status instanceof HttpStatus hs ? hs.name() : "ERROR", ex.getMessage());
     }
 }

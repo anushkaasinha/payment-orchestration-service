@@ -1,148 +1,40 @@
 # Payment Orchestration Service (Spring Boot)
 
-A backend-heavy system that models how real-world payment orchestration works in fintech and large-scale commerce platforms.
+Backend-heavy payment orchestration modelled on production fintech patterns: multi-gateway failover, idempotency,
+retry orchestration, signed webhooks with a dead-letter queue, and a double-entry ledger.
 
-The focus is not just on processing payments, but on handling failure scenarios, ensuring consistency, and maintaining reliability across distributed flows.
+## What is implemented
+| Capability | How |
+|---|---|
+| Multi-gateway routing | `GatewayRouter` tries PAYU, PAYTM, STRIPE in priority order. Outage/timeout fails over; hard decline stops (another gateway cannot fix it). |
+| Circuit breaker | 3 consecutive transient failures open a gateway for 30s; it is skipped without being called. |
+| Idempotency | Unique `(merchant, idempotencyKey)`. Replay returns the original payment (`200` + `Idempotent-Replayed: true`). Same key with a different payload is `409`. Concurrent inserts are resolved by catching the unique-constraint race. |
+| Retry orchestration | All gateways failed -> `RETRY_SCHEDULED` with exponential backoff + jitter, a scheduler re-processes due payments, `EXHAUSTED` after `maxRetries`. `@Version` optimistic locking prevents two workers double-processing. |
+| Webhooks | HMAC-SHA256 signed, exponential backoff, `DEAD_LETTER` after 5 attempts, admin replay, SSRF guard for public deployments. |
+| Ledger | Successful capture writes DEBIT `CUSTOMER_FUNDS` = CREDIT `MERCHANT_PAYABLE` + CREDIT `PLATFORM_REVENUE` (2% fee). |
+| Reconciliation | Per-merchant: captured vs ledger debits/credits, fees, net settlement, successes missing ledger entries. |
+| Auth | `X-ADMIN-KEY` (admin), `X-API-KEY` (merchant). JSON 401/403. |
+| Errors | `GlobalExceptionHandler` returns `{code, message, timestamp}` everywhere. |
 
-Built to reflect backend engineering patterns used in production systems at companies like Razorpay and Amazon.
+Gateways are simulated (`SimulatedGateway`). To go real, implement `PaymentGateway` for each provider SDK.
+Admin can flip a gateway to `UP | FLAKY | DOWN | DECLINE` at runtime to demo failover.
 
-Core Capabilities:
+## API
+Admin (`X-ADMIN-KEY`): `POST /api/v1/admin/merchants`, `GET /api/v1/admin/reconciliation/{merchantId}`,
+`GET /api/v1/admin/webhooks/dead-letter`, `POST /api/v1/admin/webhooks/{id}/replay`,
+`GET /api/v1/admin/gateways`, `PUT /api/v1/admin/gateways/{PAYU|PAYTM|STRIPE}` body `{"mode":"DOWN"}`
 
-Idempotent payment APIs to prevent duplicate transactions
+Merchant (`X-API-KEY`): `POST /api/v1/merchant/payments`, `GET /api/v1/merchant/payments`,
+`GET /api/v1/merchant/payments/{id}`, `POST /api/v1/merchant/payments/{id}/force-retry`
 
-Retry orchestration with exponential backoff for failure handling
+Demo receiver: `POST /webhook-sink` (always 200).
 
-Webhook delivery system with dead-letter queue behavior
-
-Ledger creation for transaction reconciliation
-
-API key-based authentication (merchant + admin roles)
-
-Centralized validation and global exception handling
-
-Automated test coverage for critical flows
-
-- Java 21
-- Spring Boot 3
-- Spring Security
-- Spring Data JPA (Hibernate)
-- H2 (in-memory DB)
-- Maven
-- JUnit 5 + MockMvc
-
-## High-Level Architecture
-- `Merchant APIs` create/query/retry payments
-- `GatewaySimulator` simulates success / transient / hard failures
-- `Payment Retry Scheduler` reprocesses due payments
-- `Webhook Dispatcher` retries outbound webhook events and pushes irrecoverable events to dead-letter status
-- `Ledger Entries` (DEBIT/CREDIT) are generated for successful captures
-- `Admin APIs` onboard merchants, run reconciliation, inspect dead-letter webhooks
-
-## Project Structure
-- `/src/main/java/com/resumebackend/payments/controller` -> REST APIs
-- `/src/main/java/com/resumebackend/payments/service` -> business logic + schedulers
-- `/src/main/java/com/resumebackend/payments/domain` -> entities and enums
-- `/src/main/java/com/resumebackend/payments/repository` -> JPA repositories
-- `/src/main/java/com/resumebackend/payments/security` -> API key auth filter + principal
-- `/src/main/java/com/resumebackend/payments/exception` -> centralized exception handling
-- `/src/test/java/com/resumebackend/payments` -> tests
-
-## Security Model
-- Admin endpoints: header `X-ADMIN-KEY`
-- Merchant endpoints: header `X-API-KEY`
-
-Default values (`application.yml`):
-- Admin key: `admin_secret_123`
-- Seed merchant API key: `m_demo_merchant_key`
-
-## API Endpoints
-
-### Admin
-- `POST /api/v1/admin/merchants` -> create merchant
-- `GET /api/v1/admin/reconciliation/{merchantId}` -> summary settlement view
-- `GET /api/v1/admin/webhooks/dead-letter` -> inspect failed webhooks
-
-### Merchant
-- `POST /api/v1/merchant/payments` -> create + process payment intent
-- `GET /api/v1/merchant/payments/{paymentId}` -> payment details + attempt history
-- `POST /api/v1/merchant/payments/{paymentId}/force-retry` -> manual retry
-
-## Example Flow
-
-### 1. Create merchant (admin)
-```bash
-curl -X POST http://localhost:8080/api/v1/admin/merchants \
-  -H "X-ADMIN-KEY: admin_secret_123" \
-  -H "Content-Type: application/json" \
-  -d '{"name":"Acme Corp"}'
+## Run
 ```
-
-### 2. Create payment (merchant)
-```bash
-curl -X POST http://localhost:8080/api/v1/merchant/payments \
-  -H "X-API-KEY: m_demo_merchant_key" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "orderId": "ORD-2026-001",
-    "amount": 1299.00,
-    "currency": "INR",
-    "idempotencyKey": "idem-2026-001",
-    "webhookUrl": "https://merchant.example/webhook/payment",
-    "maxRetries": 3
-  }'
-```
-
-### 3. Query payment
-```bash
-curl http://localhost:8080/api/v1/merchant/payments/1 \
-  -H "X-API-KEY: m_demo_merchant_key"
-```
-
-### 4. Force retry (if failed/exhausted)
-```bash
-curl -X POST http://localhost:8080/api/v1/merchant/payments/1/force-retry \
-  -H "X-API-KEY: m_demo_merchant_key"
-```
-
-## Local Run
-```bash
-mvn spring-boot:run
-```
-
-## Web UI (Frontend Attached)
-A lightweight frontend is bundled into Spring Boot static assets.
-
-- Open: `http://localhost:8080/app/` (or your active port, e.g. `8082`)
-- No separate React build is required; it is served directly by this backend.
-- The UI lets you:
-- create payment
-- fetch payment
-- force retry
-- run reconciliation
-- inspect dead-letter webhooks
-
-## Run Tests
-```bash
+mvn spring-boot:run      # UI at http://localhost:8080/app/
 mvn test
+```
+Defaults: admin key `admin_secret_123`, seed merchant key `m_demo_merchant_key` (override with `ADMIN_KEY`, `SEED_MERCHANT_KEY`).
+H2 is in-memory, so data resets on restart; the seed merchant is recreated at boot.
 
-## Screenshots
-
-### Dashboard
-![Dashboard](<img width="1470" height="956" alt="Screenshot 2026-02-17 at 12 07 22 PM" src="https://github.com/user-attachments/assets/f1a27bf2-6b82-4079-99a1-b750b082d950" />
-)
-
-### Response Panel (Create Payment Success)
-![Create Payment Response](<img width="1470" height="956" alt="Screenshot 2026-02-17 at 12 09 48 PM" src="https://github.com/user-attachments/assets/c9f28246-fdbb-4e83-b70d-944d02f0a648" />
-)
-
-
-
-
-## Why This Project Is Strong For Resume
-- Demonstrates core payment backend patterns, not CRUD-only APIs.
-- Shows reliability engineering (idempotency, retries, backoff, DLQ-style handling).
-- Includes accounting-adjacent concepts (ledger + reconciliation).
-- Uses production-style layering, validation, security, and tests.
-
-## Suggested Resume Bullet (you can use directly)
-Built a Spring Boot payment orchestration service with idempotent APIs, automated retry workflows, webhook dispatch with dead-letter handling, and reconciliation ledger generation; improved simulated payment reliability and demonstrated production-grade backend design patterns.
+See `DEPLOY.md` for Render + Vercel deployment.

@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: payment-orchestration
+    runtime: docker
+    plan: free
+    healthCheckPath: /actuator/health
+    envVars:
+      - key: ADMIN_KEY
+        generateValue: true
+      - key: SEED_MERCHANT_KEY
+        value: m_demo_merchant_key
+      - key: WEBHOOK_ALLOW_PRIVATE
+        value: "false"

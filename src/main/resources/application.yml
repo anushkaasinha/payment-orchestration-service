@@ -1,42 +1,37 @@
 server:
-  port: 8081
-
+  port: ${PORT:8080}
 spring:
   application:
-    name: payment-orchestration-service
+    name: payment-orchestration
   datasource:
-    url: jdbc:h2:mem:payments;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE
-    driver-class-name: org.h2.Driver
+    url: jdbc:h2:mem:payments;DB_CLOSE_DELAY=-1
     username: sa
-    password:
+    password: ""
   jpa:
     hibernate:
       ddl-auto: update
-    properties:
-      hibernate:
-        format_sql: true
     open-in-view: false
-  h2:
-    console:
-      enabled: true
-      path: /h2-console
-
 management:
   endpoints:
     web:
       exposure:
-        include: health,info,metrics
-  endpoint:
-    health:
-      show-details: always
-
-security:
-  admin-key: admin_secret_123
-
-app:
-  payment-retry-delay-ms: 3000
-  webhook-dispatch-delay-ms: 4000
-
-logging:
-  level:
-    com.resumebackend.payments: INFO
+        include: health
+payments:
+  admin-key: ${ADMIN_KEY:admin_secret_123}
+  seed-merchant-key: ${SEED_MERCHANT_KEY:m_demo_merchant_key}
+  platform-fee-percent: 2.0
+  scheduling:
+    enabled: true
+  gateways:
+    priority: PAYU,PAYTM,STRIPE
+  breaker:
+    failure-threshold: 3
+    open-seconds: 30
+  retry:
+    base-delay-seconds: 2
+    max-delay-seconds: 300
+    poll-ms: 2000
+  webhook:
+    max-attempts: 5
+    base-delay-seconds: 2
+    allow-private: ${WEBHOOK_ALLOW_PRIVATE:true}

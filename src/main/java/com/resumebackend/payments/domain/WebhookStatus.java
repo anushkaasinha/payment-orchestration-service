@@ -1,8 +1,3 @@
 package com.resumebackend.payments.domain;
 
-public enum WebhookStatus {
-    PENDING,
-    DELIVERED,
-    RETRYING,
-    DEAD_LETTER
-}
+public enum WebhookStatus { PENDING, DELIVERED, DEAD_LETTER }

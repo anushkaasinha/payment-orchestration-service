@@ -1,0 +1,7 @@
+{
+  "rewrites": [
+    { "source": "/api/:path*", "destination": "https://YOUR-APP.onrender.com/api/:path*" },
+    { "source": "/webhook-sink", "destination": "https://YOUR-APP.onrender.com/webhook-sink" },
+    { "source": "/actuator/health", "destination": "https://YOUR-APP.onrender.com/actuator/health" }
+  ]
+}
