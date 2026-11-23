@@ -1,3 +1,4 @@
+
 services:
   - type: web
     name: payment-orchestration
@@ -5,9 +6,44 @@ services:
     plan: free
     healthCheckPath: /actuator/health
     envVars:
+      - key: SPRING_PROFILES_ACTIVE
+        value: prod
+
       - key: ADMIN_KEY
         generateValue: true
+
       - key: SEED_MERCHANT_KEY
-        value: m_demo_merchant_key
+        generateValue: true
+
       - key: WEBHOOK_ALLOW_PRIVATE
         value: "false"
+
+      - key: DB_HOST
+        fromDatabase:
+          name: payments-db
+          property: host
+
+      - key: DB_PORT
+        fromDatabase:
+          name: payments-db
+          property: port
+
+      - key: DB_NAME
+        fromDatabase:
+          name: payments-db
+          property: database
+
+      - key: DB_USER
+        fromDatabase:
+          name: payments-db
+          property: user
+
+      - key: DB_PASSWORD
+        fromDatabase:
+          name: payments-db
+          property: password
+
+databases:
+  - name: payments-db
+    databaseName: payments
+    user: payments_user
