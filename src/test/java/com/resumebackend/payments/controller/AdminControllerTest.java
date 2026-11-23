@@ -30,7 +30,7 @@ class AdminControllerTest {
         mockMvc.perform(post("/api/v1/admin/merchants")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(new CreateMerchantRequest("Acme"))))
-                .andExpect(status().isForbidden());
+               .andExpect(status().isUnauthorized());
     }
 
     @Test

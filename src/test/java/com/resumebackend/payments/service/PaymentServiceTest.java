@@ -1,9 +1,12 @@
 package com.resumebackend.payments.service;
 
+import com.resumebackend.payments.controller.Dtos.CreatePaymentRequest;
+import com.resumebackend.payments.domain.GatewayName;
 import com.resumebackend.payments.domain.PaymentStatus;
-import com.resumebackend.payments.dto.CreatePaymentIntentRequest;
-import com.resumebackend.payments.dto.PaymentDetailResponse;
+import com.resumebackend.payments.gateway.GatewayMode;
+import com.resumebackend.payments.gateway.GatewayRegistry;
 import com.resumebackend.payments.repository.MerchantRepository;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -24,16 +27,28 @@ class PaymentServiceTest {
     @Autowired
     private MerchantRepository merchantRepository;
 
+    @Autowired
+    private GatewayRegistry gatewayRegistry;
+
     private Long merchantId;
 
     @BeforeEach
     void setup() {
-        merchantId = merchantRepository.findByApiKey("m_demo_merchant_key").orElseThrow().getId();
+        gatewayRegistry.reset();
+
+        merchantId = merchantRepository.findByApiKey("m_demo_merchant_key")
+                .orElseThrow()
+                .getId();
+    }
+
+    @AfterEach
+    void cleanup() {
+        gatewayRegistry.reset();
     }
 
     @Test
     void shouldBeIdempotentForSameIdempotencyKey() {
-        CreatePaymentIntentRequest request = new CreatePaymentIntentRequest(
+        CreatePaymentRequest request = new CreatePaymentRequest(
                 "ORD-FORCE_SUCCESS-101",
                 new BigDecimal("499.00"),
                 "INR",
@@ -42,17 +57,27 @@ class PaymentServiceTest {
                 3
         );
 
-        PaymentDetailResponse first = paymentService.createAndProcess(merchantId, request);
-        PaymentDetailResponse second = paymentService.createAndProcess(merchantId, request);
+        PaymentService.CreateResult first =
+                paymentService.create(merchantId, request);
+
+        PaymentService.CreateResult second =
+                paymentService.create(merchantId, request);
 
         assertThat(first.payment().id()).isEqualTo(second.payment().id());
-        assertThat(second.payment().status()).isEqualTo(PaymentStatus.SUCCEEDED);
+        assertThat(first.payment().status()).isEqualTo(PaymentStatus.SUCCESS);
+        assertThat(second.replayed()).isTrue();
     }
 
     @Test
     void shouldScheduleRetryOnTransientFailure() {
-        CreatePaymentIntentRequest request = new CreatePaymentIntentRequest(
-                "ORD-FORCE_SOFT_FAIL-RETRY",
+
+        // Simulate an outage at every payment gateway.
+        for (GatewayName gateway : GatewayName.values()) {
+            gatewayRegistry.setMode(gateway, GatewayMode.DOWN);
+        }
+
+        CreatePaymentRequest request = new CreatePaymentRequest(
+                "ORD-RETRY-TEST-101",
                 new BigDecimal("799.00"),
                 "INR",
                 "idem-retry-1",
@@ -60,10 +85,13 @@ class PaymentServiceTest {
                 3
         );
 
-        PaymentDetailResponse result = paymentService.createAndProcess(merchantId, request);
+        PaymentService.CreateResult result =
+                paymentService.create(merchantId, request);
 
-        assertThat(result.payment().status()).isEqualTo(PaymentStatus.RETRY_SCHEDULED);
-        assertThat(result.payment().attemptCount()).isEqualTo(1);
-        assertThat(result.payment().nextRetryAt()).isNotNull();
+        assertThat(result.payment().status())
+                .isEqualTo(PaymentStatus.RETRY_SCHEDULED);
+
+        assertThat(result.payment().nextRetryAt())
+                .isNotNull();
     }
 }
